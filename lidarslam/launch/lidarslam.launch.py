@@ -49,7 +49,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'main_param_dir',
             default_value=main_param_dir_default,
-            description='Full path to the main parameter YAML file.',
+            description='Full path to the main parameter YAML file.',   
         ),
         DeclareLaunchArgument(
             'use_sim_time',
@@ -78,7 +78,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_rviz',
-            default_value='false',
+            default_value='true',
             description='Start RViz (requires rviz2 installed on the system).',
         ),
         DeclareLaunchArgument(
@@ -88,17 +88,17 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'input_cloud',
-            default_value='/points_raw',
+            default_value='/morai/lidar/points',
             description='Input point cloud topic (sensor_msgs/PointCloud2).',
         ),
         DeclareLaunchArgument(
             'imu_topic',
-            default_value='/imu',
+            default_value='/morai/imu',
             description='IMU topic for scanmatcher (sensor_msgs/Imu).',
         ),
         DeclareLaunchArgument(
             'gnss_topic',
-            default_value='/gnss/fix',
+            default_value='/morai/gps/fix',
             description='NavSatFix topic for graph_based_slam when use_gnss:=true.',
         ),
         DeclareLaunchArgument(
@@ -119,12 +119,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'lidar_frame',
-            default_value='lidar',
+            default_value='morai_lidar',
             description='LiDAR frame id (child frame for the LiDAR TF).',
         ),
         DeclareLaunchArgument(
             'use_odom_input',
-            default_value='false',
+            default_value='true',
             description=(
                 'Use odometry input mode for graph_based_slam '
                 '(for external LIO frontends like RKO-LIO).'
@@ -132,7 +132,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'publish_static_tf',
-            default_value='true',
+            default_value='false',
             description='Publish an identity static TF from base_frame to lidar_frame.',
         ),
         DeclareLaunchArgument('static_tf_x', default_value='0'),

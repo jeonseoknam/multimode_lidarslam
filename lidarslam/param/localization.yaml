@@ -1,0 +1,35 @@
+scan_matcher:
+  ros__parameters:
+    global_frame_id: "map"
+    robot_frame_id: "base_link"
+    registration_method: "NDT"
+    ndt_resolution: 1.8
+    #ndt_resolution: 1.2
+    ndt_num_threads: 3
+    # GICP일 때만 유효
+    #gicp_corr_dist_threshold: 5.0
+    vg_size_for_input: 0.30
+    vg_size_for_map: 0.20
+    use_min_max_filter: true
+    scan_min_range: 0.5
+    scan_max_range: 100.0
+    scan_period: 0.1
+    set_initial_pose: true
+    initial_pose_x: 0.01269778775459271
+    initial_pose_y: -1.3999424153107651
+    initial_pose_z: -1.1
+    initial_pose_qx: 0.0
+    initial_pose_qy: 0.0
+    initial_pose_qz: 0.7103062186114302
+    initial_pose_qw: 0.7038928013568054
+    use_imu: true
+    use_odom: false
+    map_path: "/home/misys/lidarslam2_ws/map/0414_down_sample_map/map.pcd"
+    publish_tf: false
+  
+    # map update 전용(slam)
+    trans_for_mapupdate: 1.5
+    num_targeted_cloud: 15
+    map_publish_period: 15.0
+
+    use_sim_time: true

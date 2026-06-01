@@ -40,6 +40,10 @@
 #include "graph_based_slam/dynamic_object_filter.hpp"
 #include "g2o/core/robust_kernel_impl.h"
 
+#include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/exceptions.h>
+
 using namespace std::chrono_literals;
 
 namespace graphslam
@@ -73,6 +77,7 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions & opt
   get_parameter(
     "scan_context_loop_closure_score_threshold",
     scan_context_loop_closure_score_threshold_);
+
   declare_parameter("distance_loop_closure", 20.0);
   get_parameter("distance_loop_closure", distance_loop_closure_);
   declare_parameter("range_of_searching_loop_closure", 20.0);
@@ -213,6 +218,17 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions & opt
   get_parameter("use_gnss", use_gnss_);
   declare_parameter("gnss_topic", std::string("/gnss/fix"));
   get_parameter("gnss_topic", gnss_topic_);
+
+  // Local Cartesian 기반 pose constraint
+  declare_parameter("gnss_constraint_source", std::string("navsat"));
+  get_parameter("gnss_constraint_source", gnss_constraint_source_);
+
+  declare_parameter("gnss_pose_topic", std::string("/gnss_pose_localcartesian"));
+  get_parameter("gnss_pose_topic", gnss_pose_topic_);
+
+  declare_parameter("gnss_pose_cov_topic", std::string("/gnss_pose_cov_localcartesian"));
+  get_parameter("gnss_pose_cov_topic", gnss_pose_cov_topic_);
+
   declare_parameter("gnss_info_weight", 1.0);
   get_parameter("gnss_info_weight", gnss_info_weight_);
   declare_parameter("gnss_use_covariance_weighting", true);
@@ -237,7 +253,7 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions & opt
   get_parameter(
     "gnss_origin_consistency_threshold_m",
     gnss_origin_consistency_threshold_m_);
-  declare_parameter("use_imu_preintegration", false);
+  declare_parameter("use_imu_preintegration", true);
   get_parameter("use_imu_preintegration", use_imu_preintegration_);
   declare_parameter("imu_rotation_info_roll_pitch", 100.0);
   get_parameter("imu_rotation_info_roll_pitch", imu_rotation_info_roll_pitch_);
@@ -626,7 +642,7 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions & opt
     std::cout << "dynamic_object_filter_max_range_from_sensor_m:" <<
       dynamic_object_filter_max_range_from_sensor_m_ << std::endl;
   }
-  declare_parameter("use_odom_input", false);
+  declare_parameter("use_odom_input", true);
   get_parameter("use_odom_input", use_odom_input_);
   declare_parameter("submap_distance_threshold", 1.5);
   get_parameter("submap_distance_threshold", submap_distance_threshold_);
@@ -641,6 +657,10 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions & opt
   }
   if (use_gnss_) {
     std::cout << "gnss_topic:" << gnss_topic_ << std::endl;
+    std::cout << "gnss_constraint_source:" << gnss_constraint_source_ << std::endl;
+    std::cout << "gnss_topic:" << gnss_topic_ << std::endl;
+    std::cout << "gnss_pose_topic:" << gnss_pose_topic_ << std::endl;
+    std::cout << "gnss_pose_cov_topic:" << gnss_pose_cov_topic_ << std::endl;
     std::cout << "gnss_info_weight:" << gnss_info_weight_ << std::endl;
     std::cout << "gnss_use_covariance_weighting:" << std::boolalpha <<
       gnss_use_covariance_weighting_ << std::endl;
@@ -735,10 +755,10 @@ void GraphBasedSlamComponent::initializePubSub()
 
   if (use_odom_input_) {
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      "odom_input", 10,
+      "/gnss_odom", 10,
       std::bind(&GraphBasedSlamComponent::receiveOdometry, this, std::placeholders::_1));
     cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-      "cloud_input", rclcpp::SensorDataQoS(),
+      "/morai/lidar/points", rclcpp::SensorDataQoS(),
       std::bind(&GraphBasedSlamComponent::receiveCloud, this, std::placeholders::_1));
     RCLCPP_INFO(get_logger(), "Direct odom+cloud input mode enabled");
   }
@@ -767,18 +787,44 @@ void GraphBasedSlamComponent::initializePubSub()
         receiveImu(*msg);
       };
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-      "/imu", rclcpp::SensorDataQoS(), imu_callback);
+      "/morai/imu", rclcpp::SensorDataQoS(), imu_callback);
     RCLCPP_INFO(get_logger(), "IMU preintegration enabled, subscribed to /imu");
   }
 
   if (use_gnss_) {
-    gnss_sub_ = create_subscription<sensor_msgs::msg::NavSatFix>(
-      gnss_topic_, rclcpp::SensorDataQoS(),
-      [this](const sensor_msgs::msg::NavSatFix::SharedPtr msg) {receiveNavSatFix(*msg);});
-    RCLCPP_INFO(
-      get_logger(),
-      "GNSS constraints enabled, subscribed to %s",
-      gnss_topic_.c_str());
+    if (gnss_constraint_source_ == "navsat") {
+      gnss_sub_ = create_subscription<sensor_msgs::msg::NavSatFix>(
+        gnss_topic_, rclcpp::SensorDataQoS(),
+        [this](const sensor_msgs::msg::NavSatFix::SharedPtr msg) {receiveNavSatFix(*msg);});
+      RCLCPP_INFO(
+        get_logger(),
+        "GNSS constraints enabled (navsat mode), subscribed to %s",
+        gnss_topic_.c_str());
+    } else if (gnss_constraint_source_ == "pose") {
+      gnss_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+        gnss_pose_topic_, rclcpp::QoS(10),
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {receiveGnssPose(*msg);});
+      RCLCPP_INFO(
+        get_logger(),
+        "GNSS constraints enabled (pose mode), subscribed to %s",
+        gnss_pose_topic_.c_str());
+    } else if (gnss_constraint_source_ == "pose_cov") {
+      gnss_pose_cov_sub_ =
+        create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        gnss_pose_cov_topic_, rclcpp::QoS(10),
+        [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
+          receiveGnssPoseWithCovariance(*msg);
+        });
+      RCLCPP_INFO(
+        get_logger(),
+        "GNSS constraints enabled (pose_cov mode), subscribed to %s",
+        gnss_pose_cov_topic_.c_str());
+    } else {
+      RCLCPP_ERROR(
+        get_logger(),
+        "Invalid gnss_constraint_source: %s (expected navsat, pose, or pose_cov)",
+        gnss_constraint_source_.c_str());
+    }
   }
 
   RCLCPP_INFO(get_logger(), "initialization end");
@@ -1930,7 +1976,17 @@ void GraphBasedSlamComponent::doPoseAdjustment(
     g2o::VertexSE3 * vertex_se3 = new g2o::VertexSE3();
     vertex_se3->setId(i);
     vertex_se3->setEstimate(pose);
-    if (i == 0) {vertex_se3->setFixed(true);}
+    // if (i == 0) {vertex_se3->setFixed(true);}
+
+    // 첫 submap vertex를 fixed 하지 않는 로직(테스트용)
+    const bool fix_first_vertex = !(use_gnss_ && gnss_origin_set_);
+
+    if (i == 0 && fix_first_vertex) {
+      vertex_se3->setFixed(true);
+    } else {
+      vertex_se3->setFixed(false);
+    }
+
     optimizer.addVertex(vertex_se3);
 
     if (i > 0) {
@@ -2027,7 +2083,8 @@ void GraphBasedSlamComponent::doPoseAdjustment(
       double submap_time = rclcpp::Time(map_array_msg.submaps[i].header.stamp).seconds();
       // Find nearest GNSS measurement
       double best_dt = std::numeric_limits<double>::max();
-      GnssEnu best_gnss;
+      // GnssEnu best_gnss;
+      GnssCartesian best_gnss;
       bool found = false;
       for (const auto & g : gnss_buffer_) {
         double dt = std::abs(g.stamp - submap_time);
@@ -2168,11 +2225,83 @@ void GraphBasedSlamComponent::doPoseAdjustment(
   }
 }
 
+// void GraphBasedSlamComponent::receiveNavSatFix(const sensor_msgs::msg::NavSatFix & msg)
+// {
+//   if (msg.status.status < sensor_msgs::msg::NavSatStatus::STATUS_FIX) {
+//     return;  // No valid fix
+//   }
+//   if (!isUsableGnssFix(msg)) {
+//     return;
+//   }
+
+//   std::lock_guard<std::mutex> lock(gnss_mtx_);
+
+//   if (!gnss_origin_set_) {
+//     tryInitializeGnssOrigin(msg.latitude, msg.longitude, msg.altitude);
+//     if (!gnss_origin_set_) {
+//       return;
+//     }
+//   }
+
+//   Eigen::Vector3d enu = geodeticToEnu(msg.latitude, msg.longitude, msg.altitude);
+//   detail::GnssWeightingConfig weighting_config;
+//   weighting_config.base_info_weight = gnss_info_weight_;
+//   weighting_config.vertical_weight_scale = 0.1;
+//   weighting_config.use_covariance_weighting = gnss_use_covariance_weighting_;
+//   weighting_config.covariance_min_variance_m2 = gnss_covariance_min_variance_m2_;
+//   weighting_config.covariance_max_variance_m2 = gnss_covariance_max_variance_m2_;
+//   weighting_config.rtk_fix_max_horizontal_stddev_m = gnss_rtk_fix_max_horizontal_stddev_m_;
+//   weighting_config.rtk_fix_weight_scale = gnss_rtk_fix_weight_scale_;
+//   weighting_config.non_rtk_weight_scale = gnss_non_rtk_weight_scale_;
+//   const detail::GnssConstraintWeights gnss_weights =
+//     detail::computeGnssConstraintWeights(msg, weighting_config);
+//   const double receive_time_sec = get_clock()->now().seconds();
+//   const double header_time_sec = rclcpp::Time(msg.header.stamp).seconds();
+//   const detail::GnssTimestampResolution stamp_resolution =
+//     detail::resolveGnssMeasurementStamp(
+//     header_time_sec, receive_time_sec, gnss_header_stamp_max_skew_sec_);
+//   GnssEnu g;
+//   g.stamp = stamp_resolution.stamp_sec;
+//   g.x = enu.x();
+//   g.y = enu.y();
+//   g.z = enu.z();
+//   g.info_x = gnss_weights.info_x;
+//   g.info_y = gnss_weights.info_y;
+//   g.info_z = gnss_weights.info_z;
+//   g.covariance_valid = gnss_weights.covariance_valid;
+//   g.rtk_like = gnss_weights.rtk_like;
+//   g.horizontal_stddev_m = gnss_weights.horizontal_stddev_m;
+//   gnss_buffer_.push_back(g);
+
+//   if (debug_flag_ && stamp_resolution.used_fallback) {
+//     RCLCPP_WARN_THROTTLE(
+//       get_logger(),
+//       *get_clock(),
+//       5000,
+//       "GNSS header stamp %.3f s differs from receive time %.3f s by more than "
+//       "%.3f s; using receive time",
+//       header_time_sec, receive_time_sec, gnss_header_stamp_max_skew_sec_);
+//   }
+
+//   if (debug_flag_ && gnss_weights.covariance_valid) {
+//     RCLCPP_INFO_THROTTLE(
+//       get_logger(),
+//       *get_clock(),
+//       5000,
+//       "GNSS covariance weighting: horizontal_stddev=%.3f m, class=%s, info=(%.3f, %.3f, %.3f)",
+//       gnss_weights.horizontal_stddev_m,
+//       gnss_weights.rtk_like ? "rtk_like" : "non_rtk",
+//       gnss_weights.info_x, gnss_weights.info_y, gnss_weights.info_z);
+//   }
+
+//   // Limit buffer size
+//   if (gnss_buffer_.size() > 100000) {
+//     gnss_buffer_.erase(gnss_buffer_.begin(), gnss_buffer_.begin() + 25000);
+//   }
+// }
+
 void GraphBasedSlamComponent::receiveNavSatFix(const sensor_msgs::msg::NavSatFix & msg)
 {
-  if (msg.status.status < sensor_msgs::msg::NavSatStatus::STATUS_FIX) {
-    return;  // No valid fix
-  }
   if (!isUsableGnssFix(msg)) {
     return;
   }
@@ -2186,7 +2315,19 @@ void GraphBasedSlamComponent::receiveNavSatFix(const sensor_msgs::msg::NavSatFix
     }
   }
 
-  Eigen::Vector3d enu = geodeticToEnu(msg.latitude, msg.longitude, msg.altitude);
+  Eigen::Vector3d local_xyz;
+  try {
+    local_xyz = geodeticToLocalCartesian(msg.latitude, msg.longitude, msg.altitude);
+  } catch (const std::exception & e) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Failed to convert GNSS fix to LocalCartesian: %s",
+      e.what());
+    return;
+  }
+
   detail::GnssWeightingConfig weighting_config;
   weighting_config.base_info_weight = gnss_info_weight_;
   weighting_config.vertical_weight_scale = 0.1;
@@ -2196,18 +2337,21 @@ void GraphBasedSlamComponent::receiveNavSatFix(const sensor_msgs::msg::NavSatFix
   weighting_config.rtk_fix_max_horizontal_stddev_m = gnss_rtk_fix_max_horizontal_stddev_m_;
   weighting_config.rtk_fix_weight_scale = gnss_rtk_fix_weight_scale_;
   weighting_config.non_rtk_weight_scale = gnss_non_rtk_weight_scale_;
+
   const detail::GnssConstraintWeights gnss_weights =
     detail::computeGnssConstraintWeights(msg, weighting_config);
+
   const double receive_time_sec = get_clock()->now().seconds();
   const double header_time_sec = rclcpp::Time(msg.header.stamp).seconds();
   const detail::GnssTimestampResolution stamp_resolution =
     detail::resolveGnssMeasurementStamp(
-    header_time_sec, receive_time_sec, gnss_header_stamp_max_skew_sec_);
-  GnssEnu g;
+      header_time_sec, receive_time_sec, gnss_header_stamp_max_skew_sec_);
+
+  GnssCartesian g;
   g.stamp = stamp_resolution.stamp_sec;
-  g.x = enu.x();
-  g.y = enu.y();
-  g.z = enu.z();
+  g.x = local_xyz.x();
+  g.y = local_xyz.y();
+  g.z = local_xyz.z();
   g.info_x = gnss_weights.info_x;
   g.info_y = gnss_weights.info_y;
   g.info_z = gnss_weights.info_z;
@@ -2231,15 +2375,95 @@ void GraphBasedSlamComponent::receiveNavSatFix(const sensor_msgs::msg::NavSatFix
       get_logger(),
       *get_clock(),
       5000,
-      "GNSS covariance weighting: horizontal_stddev=%.3f m, class=%s, info=(%.3f, %.3f, %.3f)",
+      "GNSS LocalCartesian weighting: horizontal_stddev=%.3f m, class=%s, info=(%.3f, %.3f, %.3f)",
       gnss_weights.horizontal_stddev_m,
       gnss_weights.rtk_like ? "rtk_like" : "non_rtk",
       gnss_weights.info_x, gnss_weights.info_y, gnss_weights.info_z);
   }
 
-  // Limit buffer size
   if (gnss_buffer_.size() > 100000) {
     gnss_buffer_.erase(gnss_buffer_.begin(), gnss_buffer_.begin() + 25000);
+  }
+}
+
+void GraphBasedSlamComponent::receiveGnssPose(const geometry_msgs::msg::PoseStamped & msg)
+{
+  std::lock_guard<std::mutex> lock(gnss_mtx_);
+
+  GnssCartesian g;
+  g.stamp = rclcpp::Time(msg.header.stamp).seconds();
+  g.x = msg.pose.position.x;
+  g.y = msg.pose.position.y;
+  g.z = msg.pose.position.z;
+
+  // covariance가 없으므로 기본 weight만 사용
+  g.info_x = gnss_info_weight_;
+  g.info_y = gnss_info_weight_;
+  g.info_z = gnss_info_weight_ * 0.1;   // 기존 코드의 vertical_weight_scale=0.1과 비슷하게 맞춤
+  g.covariance_valid = false;
+  g.rtk_like = false;
+  g.horizontal_stddev_m = -1.0;
+
+  gnss_buffer_.push_back(g);
+
+  if (gnss_buffer_.size() > 100000) {
+    gnss_buffer_.erase(gnss_buffer_.begin(), gnss_buffer_.begin() + 25000);
+  }
+}
+
+void GraphBasedSlamComponent::receiveGnssPoseWithCovariance(
+  const geometry_msgs::msg::PoseWithCovarianceStamped & msg)
+{
+  std::lock_guard<std::mutex> lock(gnss_mtx_);
+
+  // 6x6 covariance row-major:
+  // [x y z rx ry rz]
+  const double var_x = std::max(msg.pose.covariance[0],  gnss_covariance_min_variance_m2_);
+  const double var_y = std::max(msg.pose.covariance[7],  gnss_covariance_min_variance_m2_);
+  const double var_z = std::max(msg.pose.covariance[14], gnss_covariance_min_variance_m2_);
+
+  const double clamped_var_x = std::min(var_x, gnss_covariance_max_variance_m2_);
+  const double clamped_var_y = std::min(var_y, gnss_covariance_max_variance_m2_);
+  const double clamped_var_z = std::min(var_z, gnss_covariance_max_variance_m2_);
+
+  GnssCartesian g;
+  g.stamp = rclcpp::Time(msg.header.stamp).seconds();
+  g.x = msg.pose.pose.position.x;
+  g.y = msg.pose.pose.position.y;
+  g.z = msg.pose.pose.position.z;
+
+  // variance -> information
+  g.info_x = gnss_info_weight_ / clamped_var_x;
+  g.info_y = gnss_info_weight_ / clamped_var_y;
+  g.info_z = (gnss_info_weight_ * 0.1) / clamped_var_z;  // 기존 NavSatFix 경로와 비슷하게 z는 약하게
+
+  g.covariance_valid = true;
+  g.horizontal_stddev_m = std::sqrt(0.5 * (clamped_var_x + clamped_var_y));
+  g.rtk_like = (g.horizontal_stddev_m <= gnss_rtk_fix_max_horizontal_stddev_m_);
+
+  if (g.rtk_like) {
+    g.info_x *= gnss_rtk_fix_weight_scale_;
+    g.info_y *= gnss_rtk_fix_weight_scale_;
+    g.info_z *= gnss_rtk_fix_weight_scale_;
+  } else {
+    g.info_x *= gnss_non_rtk_weight_scale_;
+    g.info_y *= gnss_non_rtk_weight_scale_;
+    g.info_z *= gnss_non_rtk_weight_scale_;
+  }
+
+  gnss_buffer_.push_back(g);
+
+  if (gnss_buffer_.size() > 100000) {
+    gnss_buffer_.erase(gnss_buffer_.begin(), gnss_buffer_.begin() + 25000);
+  }
+
+  if (debug_flag_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "GNSS pose_cov constraint: xyz=(%.3f, %.3f, %.3f), info=(%.3f, %.3f, %.3f), std_xy=%.3f",
+      g.x, g.y, g.z, g.info_x, g.info_y, g.info_z, g.horizontal_stddev_m);
   }
 }
 
@@ -2261,6 +2485,84 @@ bool GraphBasedSlamComponent::isUsableGnssFix(const sensor_msgs::msg::NavSatFix 
   }
   return true;
 }
+
+// void GraphBasedSlamComponent::tryInitializeGnssOrigin(double lat, double lon, double alt)
+// {
+//   GnssOriginSample sample {lat, lon, alt};
+
+//   if (!gnss_origin_candidates_.empty()) {
+//     double mean_lat = 0.0;
+//     double mean_lon = 0.0;
+//     double mean_alt = 0.0;
+//     for (const auto & candidate : gnss_origin_candidates_) {
+//       mean_lat += candidate.lat;
+//       mean_lon += candidate.lon;
+//       mean_alt += candidate.alt;
+//     }
+//     mean_lat /= gnss_origin_candidates_.size();
+//     mean_lon /= gnss_origin_candidates_.size();
+//     mean_alt /= gnss_origin_candidates_.size();
+
+//     const double jump_m = approximateGeodeticDistanceMeters(mean_lat, mean_lon, lat, lon);
+//     if (jump_m > gnss_origin_consistency_threshold_m_) {
+//       RCLCPP_WARN(
+//         get_logger(),
+//         "Resetting GNSS origin initialization after %.1f m jump in candidate fixes",
+//         jump_m);
+//       gnss_origin_candidates_.clear();
+//     }
+//   }
+
+//   gnss_origin_candidates_.push_back(sample);
+
+//   if (static_cast<int>(gnss_origin_candidates_.size()) < gnss_origin_min_samples_) {
+//     return;
+//   }
+
+//   double mean_lat = 0.0;
+//   double mean_lon = 0.0;
+//   double mean_alt = 0.0;
+//   for (const auto & candidate : gnss_origin_candidates_) {
+//     mean_lat += candidate.lat;
+//     mean_lon += candidate.lon;
+//     mean_alt += candidate.alt;
+//   }
+//   mean_lat /= gnss_origin_candidates_.size();
+//   mean_lon /= gnss_origin_candidates_.size();
+//   mean_alt /= gnss_origin_candidates_.size();
+
+//   double max_deviation_m = 0.0;
+//   for (const auto & candidate : gnss_origin_candidates_) {
+//     const double deviation_m = approximateGeodeticDistanceMeters(
+//       mean_lat, mean_lon, candidate.lat, candidate.lon);
+//     if (deviation_m > max_deviation_m) {
+//       max_deviation_m = deviation_m;
+//     }
+//   }
+
+//   if (max_deviation_m > gnss_origin_consistency_threshold_m_) {
+//     const GnssOriginSample latest = gnss_origin_candidates_.back();
+//     gnss_origin_candidates_.clear();
+//     gnss_origin_candidates_.push_back(latest);
+//     RCLCPP_WARN(
+//       get_logger(),
+//       "GNSS origin candidates were inconsistent (max deviation %.1f m), restarting accumulation",
+//       max_deviation_m);
+//     return;
+//   }
+
+//   gnss_origin_lat_ = mean_lat;
+//   gnss_origin_lon_ = mean_lon;
+//   gnss_origin_alt_ = mean_alt;
+
+  
+//   gnss_origin_set_ = true;
+//   gnss_origin_candidates_.clear();
+//   RCLCPP_INFO(
+//     get_logger(),
+//     "GNSS origin set from %d consistent fixes: lat=%.8f, lon=%.8f, alt=%.2f",
+//     gnss_origin_min_samples_, gnss_origin_lat_, gnss_origin_lon_, gnss_origin_alt_);
+// }
 
 void GraphBasedSlamComponent::tryInitializeGnssOrigin(double lat, double lon, double alt)
 {
@@ -2330,12 +2632,28 @@ void GraphBasedSlamComponent::tryInitializeGnssOrigin(double lat, double lon, do
   gnss_origin_lat_ = mean_lat;
   gnss_origin_lon_ = mean_lon;
   gnss_origin_alt_ = mean_alt;
+
+  try {
+    local_cartesian_projector_ =
+      std::make_unique<GeographicLib::LocalCartesian>(
+        gnss_origin_lat_, gnss_origin_lon_, gnss_origin_alt_);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      get_logger(),
+      "Failed to initialize LocalCartesian projector: %s",
+      e.what());
+    gnss_origin_candidates_.clear();
+    gnss_origin_set_ = false;
+    return;
+  }
+
   gnss_origin_set_ = true;
   gnss_origin_candidates_.clear();
+
   RCLCPP_INFO(
     get_logger(),
-    "GNSS origin set from %d consistent fixes: lat=%.8f, lon=%.8f, alt=%.2f",
-    gnss_origin_min_samples_, gnss_origin_lat_, gnss_origin_lon_, gnss_origin_alt_);
+    "GNSS LocalCartesian origin initialized: lat=%.10f lon=%.10f alt=%.3f",
+    gnss_origin_lat_, gnss_origin_lon_, gnss_origin_alt_);
 }
 
 double GraphBasedSlamComponent::approximateGeodeticDistanceMeters(
@@ -2353,35 +2671,50 @@ double GraphBasedSlamComponent::approximateGeodeticDistanceMeters(
   return std::sqrt(x * x + y * y) * kEarthRadiusM;
 }
 
-Eigen::Vector3d GraphBasedSlamComponent::geodeticToEnu(
+// Eigen::Vector3d GraphBasedSlamComponent::geodeticToEnu(
+//   double lat, double lon, double alt) const
+// {
+//   // WGS84 parameters
+//   constexpr double a = 6378137.0;              // semi-major axis [m]
+//   constexpr double f = 1.0 / 298.257223563;    // flattening
+//   constexpr double e2 = 2 * f - f * f;         // eccentricity squared
+
+//   auto toRad = [](double deg) {return deg * M_PI / 180.0;};
+
+//   double lat0 = toRad(gnss_origin_lat_);
+//   double lon0 = toRad(gnss_origin_lon_);
+//   double lat1 = toRad(lat);
+//   double lon1 = toRad(lon);
+
+//   double dlat = lat1 - lat0;
+//   double dlon = lon1 - lon0;
+//   double dalt = alt - gnss_origin_alt_;
+
+//   double sin_lat0 = std::sin(lat0);
+//   double N = a / std::sqrt(1.0 - e2 * sin_lat0 * sin_lat0);
+//   double M = a * (1.0 - e2) / std::pow(1.0 - e2 * sin_lat0 * sin_lat0, 1.5);
+
+//   // ENU: East = dlon * N * cos(lat), North = dlat * M, Up = dalt
+//   double east = dlon * N * std::cos(lat0);
+//   double north = dlat * M;
+//   double up = dalt;
+
+//   return Eigen::Vector3d(east, north, up);
+// }
+
+Eigen::Vector3d GraphBasedSlamComponent::geodeticToLocalCartesian(
   double lat, double lon, double alt) const
 {
-  // WGS84 parameters
-  constexpr double a = 6378137.0;              // semi-major axis [m]
-  constexpr double f = 1.0 / 298.257223563;    // flattening
-  constexpr double e2 = 2 * f - f * f;         // eccentricity squared
+  if (!local_cartesian_projector_) {
+    throw std::runtime_error("LocalCartesian projector is not initialized");
+  }
 
-  auto toRad = [](double deg) {return deg * M_PI / 180.0;};
+  double x = 0.0;
+  double y = 0.0;
+  double z = 0.0;
 
-  double lat0 = toRad(gnss_origin_lat_);
-  double lon0 = toRad(gnss_origin_lon_);
-  double lat1 = toRad(lat);
-  double lon1 = toRad(lon);
-
-  double dlat = lat1 - lat0;
-  double dlon = lon1 - lon0;
-  double dalt = alt - gnss_origin_alt_;
-
-  double sin_lat0 = std::sin(lat0);
-  double N = a / std::sqrt(1.0 - e2 * sin_lat0 * sin_lat0);
-  double M = a * (1.0 - e2) / std::pow(1.0 - e2 * sin_lat0 * sin_lat0, 1.5);
-
-  // ENU: East = dlon * N * cos(lat), North = dlat * M, Up = dalt
-  double east = dlon * N * std::cos(lat0);
-  double north = dlat * M;
-  double up = dalt;
-
-  return Eigen::Vector3d(east, north, up);
+  local_cartesian_projector_->Forward(lat, lon, alt, x, y, z);
+  return Eigen::Vector3d(x, y, z);
 }
 
 void GraphBasedSlamComponent::receiveImu(const sensor_msgs::msg::Imu & msg)
@@ -2440,13 +2773,65 @@ Eigen::Quaterniond GraphBasedSlamComponent::integrateImuRotation(double t0, doub
   return delta_q;
 }
 
+
+// lidar frame -> base_link frame 변환 없는 receiveCloud()
+// void GraphBasedSlamComponent::receiveCloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+// {
+//   if (debug_flag_ && !latest_cloud_) {
+//     RCLCPP_INFO(get_logger(), "First cloud received, %zu bytes", msg->data.size());
+//   }
+//   latest_cloud_ = msg;
+//   latest_cloud_stamp_ = rclcpp::Time(msg->header.stamp);
+//   // When cloud arrives, try to create submap with latest odom
+//   tryCreateSubmap();
+// }
+
+
+// lidar frame -> base_link frame 변환 있는 버전
 void GraphBasedSlamComponent::receiveCloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   if (debug_flag_ && !latest_cloud_) {
     RCLCPP_INFO(get_logger(), "First cloud received, %zu bytes", msg->data.size());
   }
-  latest_cloud_ = msg;
-  latest_cloud_stamp_ = rclcpp::Time(msg->header.stamp);
+
+  if (!latest_odom_valid_) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 3000,
+      "Cloud received but latest odom is not valid yet. Skip this cloud.");
+    return;
+  }
+
+  sensor_msgs::msg::PointCloud2 transformed_msg;
+
+  try {
+    tf2::TimePoint time_point = tf2::TimePoint(
+      std::chrono::seconds(msg->header.stamp.sec) +
+      std::chrono::nanoseconds(msg->header.stamp.nanosec));
+
+    const std::string target_frame = latest_odom_.child_frame_id;  // usually base_link
+    const std::string source_frame = msg->header.frame_id;         // e.g. morai_lidar
+
+    geometry_msgs::msg::TransformStamped tf_stamped =
+      tfbuffer_.lookupTransform(target_frame, source_frame, time_point);
+
+    tf2::doTransform(*msg, transformed_msg, tf_stamped);
+
+    // transformed cloud is now really in target_frame coordinates
+    transformed_msg.header.frame_id = target_frame;
+    transformed_msg.header.stamp = msg->header.stamp;
+  } catch (const tf2::TransformException & e) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Failed to transform cloud from [%s] to [%s]: %s",
+      msg->header.frame_id.c_str(),
+      latest_odom_.child_frame_id.c_str(),
+      e.what());
+    return;
+  }
+
+  latest_cloud_ = std::make_shared<sensor_msgs::msg::PointCloud2>(transformed_msg);
+  latest_cloud_stamp_ = rclcpp::Time(transformed_msg.header.stamp);
+
   // When cloud arrives, try to create submap with latest odom
   tryCreateSubmap();
 }
@@ -2491,7 +2876,7 @@ void GraphBasedSlamComponent::tryCreateSubmap()
   submap.distance = accumulated_distance_;
   submap.pose = latest_odom_.pose.pose;
   submap.cloud = *latest_cloud_;
-  submap.cloud.header.frame_id = latest_odom_.child_frame_id;
+  // submap.cloud.header.frame_id = latest_odom_.child_frame_id;
 
   int n;
   {
@@ -2643,6 +3028,7 @@ void GraphBasedSlamComponent::saveGridDividedMap(
     proj << "map_origin:" << std::endl;
     proj << "  latitude: " << gnss_origin_lat_ << std::endl;
     proj << "  longitude: " << gnss_origin_lon_ << std::endl;
+    proj << "  altitude: " << gnss_origin_alt_ << std::endl;
     std::cout << "Saved Autoware map projector info (LocalCartesian): " << proj_file
               << std::endl;
   } else {

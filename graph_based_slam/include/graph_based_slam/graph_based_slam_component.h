@@ -122,6 +122,12 @@ extern "C" {
 #include "graph_based_slam/submap_bev_descriptor.hpp"
 #include "graph_based_slam/three_d_bbs_loop_verifier.hpp"
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+
+// LocalCartesian으로 최적화하기 위해 추가
+#include <GeographicLib/LocalCartesian.hpp>
+
 namespace graphslam
 {
   class GraphBasedSlamComponent: public rclcpp::Node  // NOLINT(runtime/indentation_namespace)
@@ -282,7 +288,7 @@ private:
 
     // GNSS constraints for georeferenced mapping
     bool use_gnss_ {false};
-    std::string gnss_topic_ {"/gnss/fix"};
+    std::string gnss_topic_ {"/morai/gps/fix"};
     double gnss_info_weight_ {1.0};
     bool gnss_use_covariance_weighting_ {true};
     double gnss_covariance_min_variance_m2_ {0.01};
@@ -294,26 +300,56 @@ private:
     int gnss_origin_min_samples_ {3};
     double gnss_origin_consistency_threshold_m_ {20.0};
     rclcpp::Subscription < sensor_msgs::msg::NavSatFix > ::SharedPtr gnss_sub_;
-    struct GnssEnu
+
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gnss_pose_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr gnss_pose_cov_sub_;
+
+    std::string gnss_constraint_source_;
+    std::string gnss_pose_topic_;
+    std::string gnss_pose_cov_topic_;
+
+    
+    // struct GnssEnu
+    // {
+    //   double stamp;
+    //   double x;
+    //   double y;
+    //   double z;  // ENU coordinates relative to origin
+    //   double info_x;
+    //   double info_y;
+    //   double info_z;
+    //   bool covariance_valid;
+    //   bool rtk_like;
+    //   double horizontal_stddev_m;
+    // };
+
+    struct GnssCartesian
     {
-      double stamp;
-      double x;
-      double y;
-      double z;  // ENU coordinates relative to origin
-      double info_x;
-      double info_y;
-      double info_z;
-      bool covariance_valid;
-      bool rtk_like;
-      double horizontal_stddev_m;
+      double stamp {0.0};
+      double x {0.0};
+      double y {0.0};
+      double z {0.0};
+      double info_x {1.0};
+      double info_y {1.0};
+      double info_z {1.0};
+      bool covariance_valid {false};
+      bool rtk_like {false};
+      double horizontal_stddev_m {0.0};
     };
+
     struct GnssOriginSample
     {
       double lat;
       double lon;
       double alt;
     };
-    std::vector < GnssEnu > gnss_buffer_;
+
+
+    // LocalCartesian projector 멤버 추가
+    std::unique_ptr<GeographicLib::LocalCartesian> local_cartesian_projector_;
+
+    // std::vector < GnssEnu > gnss_buffer_;
+    std::vector <GnssCartesian> gnss_buffer_;
     std::vector < GnssOriginSample > gnss_origin_candidates_;
     std::mutex gnss_mtx_;
     bool gnss_origin_set_ {false};
@@ -328,7 +364,14 @@ private:
       double lon0,
       double lat1,
       double lon1) const;
-    Eigen::Vector3d geodeticToEnu(double lat, double lon, double alt) const;
+    // Eigen::Vector3d geodeticToEnu(double lat, double lon, double alt) const;
+    Eigen::Vector3d geodeticToLocalCartesian(double lat, double lon, double alt) const;
+
+
+    // GNSS constraint를 Local Cartesian pose로 받기
+    void receiveGnssPose(const geometry_msgs::msg::PoseStamped & msg);
+    void receiveGnssPoseWithCovariance(const geometry_msgs::msg::PoseWithCovarianceStamped & msg);
+
 
     // IMU preintegration
     bool use_imu_preintegration_ {false};

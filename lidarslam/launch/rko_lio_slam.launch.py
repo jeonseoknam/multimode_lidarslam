@@ -198,17 +198,17 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'lidar_topic',
-            default_value='/os_cloud_node/points',
+            default_value='/morai/lidar/points',
             description='LiDAR point-cloud topic.',
         ),
         DeclareLaunchArgument(
             'imu_topic',
-            default_value='/os_cloud_node/imu',
+            default_value='/morai/imu',
             description='IMU topic.',
         ),
         DeclareLaunchArgument(
             'gnss_topic',
-            default_value='/gnss/fix',
+            default_value='/morai/gps/fix',
             description='NavSatFix topic for graph_based_slam when use_gnss:=true.',
         ),
         DeclareLaunchArgument(
@@ -223,12 +223,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'lidar_frame',
-            default_value='',
+            default_value='morai_lidar',
             description='LiDAR frame id (empty = read from message header).',
         ),
         DeclareLaunchArgument(
             'imu_frame',
-            default_value='',
+            default_value='morai_imu',
             description='IMU frame id (empty = read from message header).',
         ),
         DeclareLaunchArgument(
@@ -325,7 +325,7 @@ def generate_launch_description():
         DeclareLaunchArgument('static_tf_qw', default_value='1'),
         DeclareLaunchArgument(
             'use_rviz',
-            default_value='false',
+            default_value='true',
             description='Start RViz.',
         ),
         DeclareLaunchArgument(

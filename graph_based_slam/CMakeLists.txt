@@ -39,6 +39,19 @@ find_package(pcl_conversions REQUIRED)
 find_package(lidarslam_msgs REQUIRED)
 find_package(ndt_omp_ros2 REQUIRED)
 find_package(PCL REQUIRED)
+
+find_package(PkgConfig)
+find_path(GeographicLib_INCLUDE_DIR GeographicLib/Config.h
+  PATH_SUFFIXES GeographicLib
+)
+find_library(GeographicLib_LIBRARIES
+  NAMES Geographic
+)
+
+if(NOT GeographicLib_INCLUDE_DIR OR NOT GeographicLib_LIBRARIES)
+  message(FATAL_ERROR "Could not find GeographicLib")
+endif()
+
 find_package(g2o QUIET
   COMPONENTS
     g2o::core
@@ -298,6 +311,7 @@ target_link_libraries(graph_based_slam_component
   g2o::types_slam3d
   g2o::solver_eigen
   g2o::stuff
+  ${GeographicLib_LIBRARIES}
 )
 
 add_executable(graph_based_slam_node
@@ -314,6 +328,7 @@ ament_target_dependencies(graph_based_slam_node
 include_directories(
   include
   ${PCL_INCLUDE_DIRS}
+  ${GeographicLib_INCLUDE_DIR}
 )
 link_directories(
   ${PCL_LIBRARY_DIRS}

@@ -1,8 +1,10 @@
 graph_based_slam:
     ros__parameters:
-      registration_method: "GICP"
-      ndt_resolution: 1.5
-      voxel_leaf_size: 0.2
+      # GICP / NDT
+      registration_method: "NDT"
+      # ndt_resolution: 1.5
+      ndt_resoultion: 1.8
+      voxel_leaf_size: 0.35
       loop_detection_period: 3000
       threshold_loop_closure_score: 1.5
       scan_context_loop_closure_score_threshold: -1.0
@@ -13,8 +15,8 @@ graph_based_slam:
       loop_edge_dedup_index_window: 8
       loop_max_translation_delta: 15.0
       loop_max_rotation_delta_deg: 45.0
-      use_gnss: false
-      gnss_topic: "/gnss/fix"
+      use_gnss: true
+      gnss_topic: "/morai/gps/fix"
       gnss_info_weight: 1.0
       gnss_use_covariance_weighting: true
       gnss_covariance_min_variance_m2: 0.01
@@ -59,3 +61,8 @@ graph_based_slam:
       dynamic_object_filter_temporal_window: 5
       dynamic_object_filter_max_range_from_sensor_m: 30.0
       debug_flag: false
+
+      # navsat | pose | pose_cov
+      gnss_constraint_source: "pose_cov"
+      gnss_pose_topic: "/gnss_pose_localcartesian"
+      gnss_pose_cov_topic: "/gnss_pose_cov_localcartesian"
