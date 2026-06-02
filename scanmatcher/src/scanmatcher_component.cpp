@@ -194,7 +194,7 @@ ScanMatcherComponent::ScanMatcherComponent(const rclcpp::NodeOptions & options)
     msg->pose.orientation.z = initial_pose_qz_;
     msg->pose.orientation.w = initial_pose_qw_;
     current_pose_stamped_ = *msg;
-    pose_pub_->publish(current_pose_stamped_);
+    current_pose_stamped_.pose.position.z = 0.0; pose_pub_->publish(current_pose_stamped_);
     initial_pose_received_ = true;
 
     path_.poses.push_back(*msg);
@@ -222,7 +222,7 @@ void ScanMatcherComponent::initializePubSub()
       previous_position_.z() = current_pose_stamped_.pose.position.z;
       initial_pose_received_ = true;
 
-      pose_pub_->publish(current_pose_stamped_);
+      current_pose_stamped_.pose.position.z = 0.0; pose_pub_->publish(current_pose_stamped_);
     };
 
   auto cloud_callback =
@@ -521,7 +521,7 @@ if (!initial_cloud_received_) {
         previous_odom_mat_ = Eigen::Matrix4f::Identity();
 
         // 초기화 이후 곧바로 포즈 토픽 한번 발행
-        pose_pub_->publish(current_pose_stamped_);
+        current_pose_stamped_.pose.position.z = 0.0; pose_pub_->publish(current_pose_stamped_);
       });
 
   imu_sub_ =
@@ -887,7 +887,7 @@ void ScanMatcherComponent::publishMapAndPose(
   current_pose_stamped_.pose.position.y = position.y();
   current_pose_stamped_.pose.position.z = position.z();
   current_pose_stamped_.pose.orientation = quat_msg;
-  pose_pub_->publish(current_pose_stamped_);
+  current_pose_stamped_.pose.position.z = 0.0; pose_pub_->publish(current_pose_stamped_);
 
   path_.poses.push_back(current_pose_stamped_);
   path_pub_->publish(path_);
