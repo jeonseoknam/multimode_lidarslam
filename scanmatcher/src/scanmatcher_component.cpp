@@ -528,10 +528,15 @@ if (!initial_cloud_received_) {
     create_subscription<sensor_msgs::msg::Imu>(
     "/morai/imu", rclcpp::SensorDataQoS(), imu_callback);
 
+  // Subscribe on `/input_cloud` so the launch-time remapping
+  //   remappings=[('/input_cloud', cloud_topic)]
+  // in localization.launch.py (where cloud_topic flips between
+  // /morai/lidar/points and /lidar/points_faulty based on use_faulty) is
+  // actually honoured. Hardcoding the absolute topic name here bypasses
+  // the remap and breaks fault injection.
   input_cloud_sub_ =
     create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/morai/lidar/points", rclcpp::SensorDataQoS(), cloud_callback);
-    // "/lidar/points_faulty", rclcpp::SensorDataQoS(), cloud_callback);
+    "/input_cloud", rclcpp::SensorDataQoS(), cloud_callback);
 
 
   // pub
