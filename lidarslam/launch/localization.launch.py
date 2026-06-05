@@ -36,14 +36,31 @@ def generate_launch_description():
         description='If true, scanmatcher subscribes /lidar/points_faulty instead of /morai/lidar/points'
     )
 
+    use_ground_filter_arg = DeclareLaunchArgument(
+        'use_ground_filter',
+        default_value='false',
+        description=(
+            'If true, scanmatcher subscribes /lidar/no_ground (output of '
+            'pointcloud_ground_filter_cpp) and ignores use_faulty for its '
+            'own input — the ground filter is responsible for choosing '
+            'between raw and faulty input upstream.'
+        )
+    )
+
     set_sim_time = SetParameter(
         name='use_sim_time',
         value=LaunchConfiguration('use_sim_time')
     )
 
+    # Three-way selection:
+    #   use_ground_filter=true  -> /lidar/no_ground   (filter output)
+    #   use_ground_filter=false + use_faulty=true  -> /lidar/points_faulty
+    #   use_ground_filter=false + use_faulty=false -> /morai/lidar/points
     cloud_topic = launch.substitutions.PythonExpression([
+        "'/lidar/no_ground' if '", LaunchConfiguration('use_ground_filter'),
+        "'.lower() == 'true' else (",
         "'/lidar/points_faulty' if '", LaunchConfiguration('use_faulty'),
-        "'.lower() == 'true' else '/morai/lidar/points'"
+        "'.lower() == 'true' else '/morai/lidar/points')"
     ])
 
     localization = launch_ros.actions.Node(
@@ -69,6 +86,7 @@ def generate_launch_description():
             description='Full path to main parameter file to load'),
         use_sim_time_arg,
         use_faulty_arg,
+        use_ground_filter_arg,
         set_sim_time,
         localization,
         rviz,

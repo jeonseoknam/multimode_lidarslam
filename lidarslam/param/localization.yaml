@@ -3,6 +3,14 @@ scan_matcher:
     global_frame_id: "map"
     robot_frame_id: "base_link"
     registration_method: "NDT"
+    # NOTE (2026-06-05): tried ndt_resolution=1.0 + vg_size_for_input=0.15
+    # to improve accuracy, but it (a) dropped real-time below 10Hz
+    # (avg 8.7Hz, max period 0.28s — backlog), and (b) increased wrong-
+    # local-minimum failures because the smaller basin of attraction made
+    # NDT diverge whenever the previous frame's pose was slightly off.
+    # Reverted to the original coarser tuning. Root cause of the
+    # zig-zag is elsewhere (gyro_odometer twist / scan_max_range /
+    # map quality / initial pose) — to be investigated separately.
     ndt_resolution: 1.8
     #ndt_resolution: 1.2
     ndt_num_threads: 3
@@ -12,7 +20,10 @@ scan_matcher:
     vg_size_for_map: 0.20
     use_min_max_filter: true
     scan_min_range: 0.5
-    scan_max_range: 100.0
+    # 100 → 50 (2026-06-05): distant points become sparse + noisy and
+    # contribute spurious matches; 50m is enough for vehicle localization
+    # and also reduces NDT compute load.
+    scan_max_range: 50.0
     scan_period: 0.1
     set_initial_pose: true
     initial_pose_x: 0.01269778775459271
