@@ -26,14 +26,31 @@ scan_matcher:
     scan_max_range: 50.0
     scan_period: 0.1
     set_initial_pose: true
-    initial_pose_x: 0.01269778775459271
-    initial_pose_y: -1.3999424153107651
+    # Seed for NDT. This MUST match the start of the log being replayed: the
+    # scanmatcher latches it before any cloud arrives and NDT cannot recover
+    # from a seed outside its convergence basin. raw_drive starts at
+    # (0.12, -1.34) and raw_drive3 at (-0.74, 55.71), 57 m apart — replaying
+    # raw_drive3 against the old seed left NDT at 78 m error with a matching
+    # score of 8.2 instead of 0.037, for the whole run, however long the
+    # vehicle stayed parked first.
+    # Old seed (raw_drive):
+    #   x 0.01269778775459271, y -1.3999424153107651,
+    #   qz 0.7103062186114302, qw 0.7038928013568054
+    # Deliberately left at the OLD raw_drive start (57 m from raw_drive3's).
+    # gnss_initialpose_publisher overrides it at runtime; leaving a stale value
+    # here is the test that the seed no longer has to be maintained per log.
+    initial_pose_x: -0.8850094792985774
+    initial_pose_y: 52.164162275276915
     initial_pose_z: -1.1
     initial_pose_qx: 0.0
     initial_pose_qy: 0.0
-    initial_pose_qz: 0.7103062186114302
-    initial_pose_qw: 0.7038928013568054
+    initial_pose_qz: 0.7009340272485054
+    initial_pose_qw: 0.7132261138272992
     use_imu: true
+    # Enabled together with the odom_tf_publisher node, which broadcasts
+    # odom -> base_link from wheel speed + IMU yaw rate. NDT then advances its
+    # per-scan guess by the odometry delta, which constrains the along-track
+    # direction that a straight corridor leaves degenerate.
     use_odom: false
     map_path: "/home/misys/lidarslam2_ws/map/0414_down_sample_map/map.pcd"
     publish_tf: false

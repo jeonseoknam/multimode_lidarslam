@@ -72,10 +72,17 @@ def generate_launch_description():
         )
 
 
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Spawn rviz2. Set false for headless bag-replay batches.')
+
     rviz = launch_ros.actions.Node(
         package='rviz2',
         executable='rviz2',
-        arguments=['-d', rviz_param_dir]
+        arguments=['-d', rviz_param_dir],
+        condition=launch.conditions.IfCondition(
+            launch.substitutions.LaunchConfiguration('use_rviz'))
         )
 
 
@@ -87,6 +94,7 @@ def generate_launch_description():
         use_sim_time_arg,
         use_faulty_arg,
         use_ground_filter_arg,
+        use_rviz_arg,
         set_sim_time,
         localization,
         rviz,
