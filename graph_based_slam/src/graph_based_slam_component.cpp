@@ -2040,10 +2040,13 @@ void GraphBasedSlamComponent::doPoseAdjustment(
 
       // Information matrix: high for roll/pitch rotation, moderate for yaw, zero for translation
       Eigen::Matrix<double, 6, 6> imu_info = Eigen::Matrix<double, 6, 6>::Zero();
-      // g2o EdgeSE3 information: [rot(3) | trans(3)] order
-      imu_info(0, 0) = imu_rotation_info_roll_pitch_;  // roll
-      imu_info(1, 1) = imu_rotation_info_roll_pitch_;  // pitch
-      imu_info(2, 2) = imu_rotation_info_yaw_;         // yaw
+      // g2o EdgeSE3 error is toVectorMQT(delta) = (x, y, z, qx, qy, qz), so the
+      // information block is [trans(3) | rot(3)] -- translation first. This used
+      // to be written the other way round, which put the rotation weights on
+      // translation and left the IMU attitude unconstrained.
+      imu_info(3, 3) = imu_rotation_info_roll_pitch_;  // roll
+      imu_info(4, 4) = imu_rotation_info_roll_pitch_;  // pitch
+      imu_info(5, 5) = imu_rotation_info_yaw_;         // yaw
       // translation: zero weight (don't trust IMU double integration)
       edge_se3->setInformation(imu_info);
 
@@ -2110,9 +2113,13 @@ void GraphBasedSlamComponent::doPoseAdjustment(
       g2o::EdgeSE3 * edge = new g2o::EdgeSE3();
       edge->setMeasurement(Eigen::Isometry3d::Identity());
       Eigen::Matrix<double, 6, 6> gnss_info = Eigen::Matrix<double, 6, 6>::Zero();
-      gnss_info(3, 3) = best_gnss.info_x;
-      gnss_info(4, 4) = best_gnss.info_y;
-      gnss_info(5, 5) = best_gnss.info_z;
+      // Position information belongs in the translation block (indices 0-2).
+      // It used to sit at 3-5, the rotation block: GNSS then constrained no
+      // position at all and instead pulled every submap's attitude toward the
+      // identity rotation of the fixed GNSS vertex.
+      gnss_info(0, 0) = best_gnss.info_x;
+      gnss_info(1, 1) = best_gnss.info_y;
+      gnss_info(2, 2) = best_gnss.info_z;
       edge->setInformation(gnss_info);
       edge->vertices()[0] = gnss_vertex;
       edge->vertices()[1] = optimizer.vertex(i);
