@@ -57,6 +57,15 @@ def generate_launch_description():
             description='Use simulation time (/clock). Recommended for rosbag playback.',
         ),
         DeclareLaunchArgument(
+            'scan_max_range',
+            default_value='100.0',
+            description=(
+                'Max scan range [m] for mapping. The param file carries 80.0, '
+                'which was tuned for localization on long straights; the K-City '
+                'maps were built at 100.0.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'global_frame_id',
             default_value='map',
             description='Global frame id.',
@@ -144,7 +153,11 @@ def generate_launch_description():
         DeclareLaunchArgument('static_tf_qw', default_value='1'),
         Node(
             package='scanmatcher',
-            executable='scanmatcher_node',
+            # Mapping front-end: starts from an empty map and accumulates
+            # submaps. scanmatcher_node is the localization front-end -- it
+            # matches against a prior .pcd and never builds one, so using it
+            # here silently produced no map at all.
+            executable='slam_node',
             parameters=[
                 LaunchConfiguration('main_param_dir'),
                 {
@@ -152,6 +165,7 @@ def generate_launch_description():
                     'robot_frame_id': LaunchConfiguration('robot_frame_id'),
                     'odom_frame_id': LaunchConfiguration('odom_frame_id'),
                     'use_sim_time': LaunchConfiguration('use_sim_time'),
+                    'scan_max_range': LaunchConfiguration('scan_max_range'),
                 },
             ],
             remappings=[

@@ -115,6 +115,27 @@ scanmatcher_component ${PCL_LIBRARIES})
 ament_target_dependencies(scanmatcher_node
   rclcpp)
 
+# Mapping front-end. scanmatcher_component localizes against a prior map;
+# slam_component builds one. Separate library and executable so the two never
+# link together -- the localization path is untouched.
+add_library(slam_component SHARED
+src/slam_component.cpp
+)
+
+target_compile_definitions(slam_component PRIVATE "GS_SM_BUILDING_DLL")
+
+ament_target_dependencies(slam_component ${dependencies})
+
+add_executable(slam_node
+src/slam_node.cpp
+)
+
+target_link_libraries(slam_node
+slam_component ${PCL_LIBRARIES})
+
+ament_target_dependencies(slam_node
+  rclcpp)
+
 if(small_gicp_FOUND)
   add_executable(small_gicp_odom_node
   src/small_gicp_odom_node.cpp
@@ -136,7 +157,10 @@ add_definitions(${PCL_DEFINITIONS})
 rclcpp_components_register_nodes(scanmatcher_component 
   "graphslam::ScanMatcherComponent")
 
-ament_export_libraries(scanmatcher_component)
+rclcpp_components_register_nodes(slam_component
+  "graphslam::SlamComponent")
+
+ament_export_libraries(scanmatcher_component slam_component)
 
 install(
   DIRECTORY "include/"
@@ -150,12 +174,13 @@ install(
 
 install(TARGETS
   scanmatcher_component
+  slam_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
 
-set(INSTALL_TARGETS scanmatcher_node)
+set(INSTALL_TARGETS scanmatcher_node slam_node)
 if(small_gicp_FOUND)
   list(APPEND INSTALL_TARGETS small_gicp_odom_node)
 endif()
