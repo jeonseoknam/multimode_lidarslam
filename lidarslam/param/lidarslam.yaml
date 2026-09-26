@@ -10,8 +10,16 @@ scan_matcher:
     trans_for_mapupdate: 1.5
     vg_size_for_input: 0.22
     vg_size_for_map: 0.16
-    use_min_max_filter: false
-    scan_min_range: 1.0
+    # 자차 제거. 이 값들은 use_min_max_filter 가 true 일 때만 쓰인다 -- false 로
+    # 두면 scan_min_range 를 아무리 올려도 무시되고 자차 점군이 그대로 지도에 박힌다.
+    #
+    # 필터는 센서 프레임의 수평거리 sqrt(x^2+y^2) 로 자른다. mapping_0926 bag 실측:
+    # 점이 0.87~2.0 m 에 스캔당 약 3,244개(전체의 27%) 찍히고 2.0~4.0 m 는 정확히
+    # 0개다. 그 빈 고리가 차체와 바깥 세상의 경계이므로 2.5 m 로 자르면 자차만
+    # 사라지고 유효한 점은 하나도 잃지 않는다.
+    use_min_max_filter: true
+    scan_min_range: 2.5
+    # 실측 최대 100.8 m, 100 m 초과는 0.01% 라 사실상 무손실.
     scan_max_range: 100.0
     scan_period: 0.1
     map_publish_period: 15.0
@@ -55,7 +63,7 @@ graph_based_slam:
       ndt_num_threads: 2
       voxel_leaf_size: 0.4
       loop_detection_period: 3000
-      threshold_loop_closure_score: 0.7
+      threshold_loop_closure_score: 1.5
       distance_loop_closure: 100.0
       range_of_searching_loop_closure: 20.0
       search_submap_num: 2
