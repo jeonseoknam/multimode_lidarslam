@@ -75,7 +75,13 @@ graph_based_slam:
       use_save_map_in_loop: true
       adjacent_edge_info_weight: 1000.0
       use_gnss: true
-      use_odom_input: true
+      # Direct odom+cloud submap mode. It needs an /gnss_odom publisher, and the
+      # only one this workspace ever had (gnss_odom_tools) was never launched --
+      # every mapping run logged "Cloud received but latest odom is not valid
+      # yet. Skip this cloud." for its whole duration, so no submap was ever
+      # built this way. Mapping goes through scanmatcher's map_array instead,
+      # and the GNSS edges come from gnss_topic below, not from /gnss_odom.
+      use_odom_input: false
 
       # navsat | pose | pose_cov
       gnss_constraint_source: "navsat"
