@@ -40,10 +40,13 @@ def generate_launch_description():
         'use_ground_filter',
         default_value='false',
         description=(
-            'If true, scanmatcher subscribes /lidar/no_ground (output of '
-            'pointcloud_ground_filter_cpp) and ignores use_faulty for its '
-            'own input — the ground filter is responsible for choosing '
-            'between raw and faulty input upstream.'
+            'If true, scanmatcher subscribes /lidar/no_ground and ignores '
+            'use_faulty for its own input, leaving the raw-vs-faulty choice '
+            'to whatever publishes that topic. NOTE: the pipeline no longer '
+            'ships a ground filter — pointcloud_ground_filter_cpp was '
+            'removed on 2026-09-28 because every HG-SCIF experiment ran on '
+            'the unfiltered cloud. Setting this true without supplying your '
+            'own /lidar/no_ground publisher leaves scanmatcher with no input.'
         )
     )
 
